@@ -37,7 +37,7 @@ from azure.cli.core.commands.client_factory import get_mgmt_service_client
 from azure.cli.core.profiles import ResourceType
 from azure.cli.core.util import sdk_no_wait
 
-from ._vm_utils import read_content_if_is_file, import_aaz_by_profile, IdentityType, safe_get
+from ._vm_utils import read_content_if_is_file, import_aaz_by_profile, IdentityType
 from ._vm_diagnostics_templates import get_default_diag_config
 
 from ._actions import (load_images_from_aliases_doc, load_extension_images_thru_services,
@@ -2294,13 +2294,9 @@ def attach_managed_data_disk(cmd, resource_group_name, vm_name,
 
     # attach existing managed disks
     if not new and not sku and not size_gb and disk_ids is not None:
-        from .operations.vm import VMShow
-        vm = VMShow(cli_ctx=cmd.cli_ctx)(command_args={
-            'resource_group': resource_group_name,
-            'vm_name': vm_name
-        })
-        vm_dict = vm if isinstance(vm, dict) else getattr(vm, 'result', vm)
-        data_disks = vm_dict.get('storageProfile', {}).get('dataDisks', []) or []
+        from .operations.vm import VMCreate, convert_show_result_to_snake_case as to_snake_case
+        vm = to_snake_case(get_vm_to_update_by_aaz(cmd, resource_group_name, vm_name) or {}) or {}
+        data_disks = vm.get('storage_profile', {}).get('data_disks', []) or []
         used_luns = {d.get('lun') for d in data_disks if isinstance(d, dict) and d.get('lun') is not None}
 
         def _next_lun(start=0):
@@ -2469,23 +2465,10 @@ def detach_managed_data_disk(cmd, resource_group_name, vm_name, disk_name=None,
         return result
     else:
         # here we handle managed disk
-        from .operations.vm import VMShow
-
-        vm = VMShow(cli_ctx=cmd.cli_ctx)(command_args={
-            'resource_group': resource_group_name,
-            'vm_name': vm_name
-        })
-
-        # work on a local copy of the VM dict to avoid mutating the original object.
-        vm_result = vm if isinstance(vm, dict) else getattr(vm, 'result', vm)
-        vm_dict = json.loads(json.dumps(vm_result))
-
-        # to avoid unnecessary permission check of image
-        storage_profile = vm_dict.get('storageProfile', {})
-        storage_profile["imageReference"] = None
-
+        from .operations.vm import VMCreate, convert_show_result_to_snake_case as to_snake_case
+        vm = to_snake_case(get_vm_to_update_by_aaz(cmd, resource_group_name, vm_name) or {}) or {}
         target_disk = None
-        data_disks = safe_get(vm_dict, 'storageProfile.dataDisks', default=[]) or []
+        data_disks = vm.get('storage_profile', {}).get('data_disks', []) or []
         for d in data_disks:
             # Use dict-style access; AAZ returns dicts.
             name = (d.get('name') or '').lower()
@@ -2494,12 +2477,11 @@ def detach_managed_data_disk(cmd, resource_group_name, vm_name, disk_name=None,
                 break
 
         if not target_disk:
-            attached_names = [d.get('name') for d in (safe_get(vm_dict, 'storageProfile.dataDisks', []) or [])]
+            attached_names = [d.get('name') for d in (vm.get('storage_profile', {}).get('data_disks', []) or [])]
             raise ResourceNotFoundError(
                 "No disk with the name '{}' was found. Attached: {}".format(disk_name, attached_names)
             )
-
-        disk_id = safe_get(target_disk, 'managedDisk.id')
+        disk_id = target_disk.get('managed_disk', {}).get('id', None) or None
         if not disk_id:
             raise CLIError(
                 "Disk '{}' is not a managed disk (no managedDisk.id). Only managed disks are supported for this "
@@ -2507,16 +2489,19 @@ def detach_managed_data_disk(cmd, resource_group_name, vm_name, disk_name=None,
                 .format(disk_name)
             )
 
+        disk_payload = {'diskId': disk_id}
+        if force_detach:
+            disk_payload['toBeDetached'] = True
+            disk_payload['detachOption'] = 'ForceDetach'
+        else:
+            disk_payload['detachOption'] = 'Detach'
+
         args = {
             'vm_name': vm_name,
             'resource_group': resource_group_name,
-            'data_disks_to_detach': [{
-                'diskId': disk_id,
-                'detachOption': 'ForceDetach' if force_detach else None
-            }],
+            'data_disks_to_detach': [disk_payload],
             'no_wait': no_wait
         }
-
         result = AttachDetachDataDisk(cli_ctx=cmd.cli_ctx)(command_args=args)
         return result
 # endregion
