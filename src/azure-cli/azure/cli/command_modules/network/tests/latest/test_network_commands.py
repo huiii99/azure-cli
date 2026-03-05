@@ -5176,11 +5176,22 @@ class NetworkRouteTableOperationScenarioTest(ScenarioTest):
             'rt': 'Microsoft.Network/routeTables'
         })
 
-        self.cmd('network route-table create -n {table} -g {rg} --tags foo=doo',
-                 checks=self.check('tags.foo', 'doo'))
-        self.cmd('network route-table update -n {table} -g {rg} --tags foo=boo --disable-bgp-route-propagation', checks=[
-            self.check('tags.foo', 'boo')
-        ])
+        self.cmd(
+            'network route-table create -n {table} -g {rg} --tags foo=doo --disable-peering-route All',
+            checks=[
+                self.check('tags.foo', 'doo'),
+                self.check('disablePeeringRoute', 'All')
+            ]
+        )
+        self.cmd(
+            'network route-table update -n {table} -g {rg} '
+            '--tags foo=boo --disable-bgp-route-propagation '
+            '--disable-peering-route None',
+            checks=[
+                self.check('tags.foo', 'boo'),
+                self.check('disablePeeringRoute', 'None')
+            ]
+        )
         self.cmd('network route-table route create --address-prefix 10.0.5.0/24 -n {route} -g {rg} --next-hop-type None --route-table-name {table}')
 
         self.cmd('network route-table list',
@@ -5189,12 +5200,14 @@ class NetworkRouteTableOperationScenarioTest(ScenarioTest):
             self.check('type(@)', 'array'),
             self.check('length(@)', 1),
             self.check('[0].name', '{table}'),
-            self.check('[0].type', '{rt}')
+            self.check('[0].type', '{rt}'),
+            self.check('[0].disablePeeringRoute', 'None')
         ])
         self.cmd('network route-table show --resource-group {rg} --name {table}', checks=[
             self.check('type(@)', 'object'),
             self.check('name', '{table}'),
-            self.check('type', '{rt}')
+            self.check('type', '{rt}'),
+            self.check('disablePeeringRoute', 'None')
         ])
         self.cmd('network route-table route list --resource-group {rg} --route-table-name {table}',
                  checks=self.check('type(@)', 'array'))
