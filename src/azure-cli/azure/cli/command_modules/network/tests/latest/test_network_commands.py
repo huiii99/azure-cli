@@ -9205,5 +9205,34 @@ class NetworkPrivateEndpointScenarioTest(ScenarioTest):
         ])
 
 
+class NetworkVirtualApplianceScenario(ScenarioTest):
+    @ResourceGroupPreparer(name_prefix='test_va', location='eastus')
+    def test_network_virtual_appliance_private_ip_address_version(self, resource_group):
+        self.kwargs.update({
+            'name': 'va1',
+        })
+
+        self.cmd('network virtual-appliance create -g {rg} -n {name}', checks=[
+            self.check('name', '{name}'),
+            self.check('privateIPAddressVersion', 'IPv4'),
+            self.check('type(bandwidthInGbps)', 'number'),
+        ])
+
+        self.cmd('network virtual-appliance update -g {rg} -n {name} --private-ip-version DualStack', checks=[
+            self.check('privateIPAddressVersion', 'DualStack'),
+        ])
+
+        self.cmd('network virtual-appliance show -g {rg} -n {name}', checks=[
+            self.check('privateIPAddressVersion', 'DualStack'),
+            self.check('type(bandwidthInGbps)', 'number'),
+        ])
+
+        self.cmd('network virtual-appliance list -g {rg}', checks=[
+            self.check('length(@)', 1),
+            self.check('[0].privateIPAddressVersion', 'DualStack'),
+            self.check('type([0].bandwidthInGbps)', 'number'),
+        ])
+
+
 if __name__ == '__main__':
     unittest.main()
